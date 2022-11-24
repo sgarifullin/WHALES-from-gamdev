@@ -1,0 +1,60 @@
+WITH days as (
+  SELECT
+	user_id,
+	lead(created_at) over (partition by user_id order by created_at)-created_at diff
+  FROM gd2.purchases
+  WHERE state='successful'),
+  
+Sum_amount as (
+  SELECT
+	user_id,
+	Sum (amount) sum_amount
+  FROM gd2.purchases
+	WHERE state='successful'
+	GROUP by 1),
+
+core_users as (
+  SELECT
+	distinct p.user_id core_users_id
+  FROM gd2.purchases p JOIN days d
+	on d.user_id=p.user_id
+	JOIN Sum_amount sa 
+	on sa.user_id=p.user_id
+	WHERE p.state='successful' and sa.sum_amount>1200 
+	and (p.created_at between '2020-05-01' and '2020-06-30')
+	Group by 1
+	Having avg(d.diff)<=28),
+
+	
+Core_amount as (
+  SELECT
+	SUM(
+	   CASE WHEN p.user_id in (Select core_users_id from core_users)
+	   Then p.amount Else NULL END) amount
+ 	FROM gd2.purchases p
+	WHERE p.state='successful'
+	and (p.created_at between '2020-05-01' and '2020-06-30')),
+
+total_amount_may_june as (
+  SELECT 
+	SUM (amount) amount
+  FROM gd2.purchases p
+	WHERE p.state='successful'
+	and (p.created_at between '2020-05-01' and '2020-06-30')),
+
+core_sum_perxent as (
+	SELECT
+       ca.amount/tamj.amount*100
+    FROM
+    core_amount ca, total_amount_may_june tamj)
+	
+	
+SELECT
+  distinct p.user_id,
+  Sum (p.amount) June_amount,
+  Case When p.user_id in (Select core_users_id FROM core_users)
+  THEN 'core' ELSE 'not_core' end core
+FROM gd2.purchases p
+  WHERE p.state='successful'
+	and (p.created_at between '2020-06-01' and '2020-06-30')
+  Group by 1

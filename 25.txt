@@ -1,0 +1,97 @@
+WITH user_address as(
+  SELECT
+    user_id,
+	CASE WHEN country='Russia' Then 'yes'
+	When country is Null Then Null
+	Else 'no' end is_russia
+  FROM gd2.addresses),
+
+user_phone as(
+  SELECT
+    id user_id,
+    Case WHEN phone like '7%' and char_length(phone)=11 Then 'yes'
+    When phone is null then null 
+    Else 'no' end is_russia
+  FROM gd2.users_phones),
+  
+users_with_geo as(
+  SELECT
+	up.user_id,
+	COALESCE(ua.is_russia,up.is_russia) is_russia
+  FROM user_phone up
+	left JOIN user_address ua on up.user_id=ua.user_id),
+	
+purchases_per_countries as(
+  SELECT 
+	amount, 
+	created_at, 
+	id, 
+	state, 
+	uwg.user_id,
+	is_russia
+  FROM users_with_geo uwg
+  JOIN gd2.purchases p on uwg.user_id=p.user_id),
+  
+first_purchases as(
+  SELECT
+    user_id,
+    DATE_TRUNC('month', min(created_at)) m,
+	EXTRACT (month from created_at) m2,
+	min(created_at) first_date
+  FROM gd2.purchases
+  WHERE state='successful'
+  Group by 1,3 ),
+  
+cohorts_russia as (
+  SELECT
+    fp.m first_month,
+	DATE_TRUNC('month', p.created_at) buy_month,
+	fp.user_id
+  FROM first_purchases fp
+	LEFT JOIN users_with_geo uwg on uwg.user_id=fp.user_id
+	JOIN gd2.purchases p on p.user_id=fp.user_id
+	WHERE uwg.is_russia<>'yes' and p.state='successful'
+    Group by 1,2,3
+    Order by 1,2 ),
+	
+	
+sum_bill as(
+  SELECT
+	p.user_id,
+	SUM (p.amount) sum_amount
+  FROM gd2.purchases p
+  WHERE state='successful'
+  Group by 1),
+
+
+PERCENTILE80_amount as (
+  SELECT
+	PERCENTILE_CONT(0.8)
+    WITHIN GROUP (ORDER BY sum_amount) percentile_80
+  FROM sum_bill),
+
+  
+avg_retention_day2 as(
+	select
+	  user_id,
+      lead(created_at) over(partition by user_id order by created_at) - created_at as day_lenght
+   from gd2.purchases
+   where state ='successful'),
+   
+PERCENTILE80_days as(
+   select 
+     PERCENTILE_CONT(0.8) WITHIN GROUP (ORDER BY day_lenght) AS perc_80
+   from avg_retention_day2),
+   
+Succes_buy_in_may_and_June as (
+  SELECT
+    Count (distinct user_id)
+  FROM gd2.purchases
+  where state ='successful' and (EXTRACT (month from created_at)='5'or EXTRACT (month from created_at)='6'))
+ 
+
+SELECT
+*
+from Succes_buy_in_may_and_June
+
+
